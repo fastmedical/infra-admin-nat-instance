@@ -2,13 +2,13 @@
 
 # Enable IP forwarding for NAT
 sysctl -w net.ipv4.ip_forward=1
-sysctl -w net.ipv4.conf.eth0.send_redirects=0
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+sysctl -w net.ipv4.conf.ens5.send_redirects=0
+iptables -t nat -A POSTROUTING -o ens5 -j MASQUERADE
 
 # Persist the NAT settings across reboots
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-echo "net.ipv4.conf.eth0.send_redirects=0" >> /etc/sysctl.conf
-echo "iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE" >> /etc/rc.local
+echo "net.ipv4.conf.ens5.send_redirects=0" >> /etc/sysctl.conf
+echo "iptables -t nat -A POSTROUTING -o ens5 -j MASQUERADE" >> /etc/rc.local
 
 # Update the package lists for upgrades and new package installations
 apt-get update
@@ -21,27 +21,36 @@ apt-get install -y docker.io
 usermod -aG docker ubuntu
 
 # Install development-related packages
-apt-get install -y python3 python3-pip nodejs npm jq redis-tools unzip git wget
+apt-get install -y python3 python3-pip jq redis-tools unzip git wget net-tools
 
 # Install Miniconda
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O /tmp/miniconda.sh
 bash /tmp/miniconda.sh -b -p /opt/miniconda
 rm /tmp/miniconda.sh
 
-# Add Miniconda to PATH for the ubuntu user
-echo 'export PATH="/opt/miniconda/bin:$PATH"' >> /home/ubuntu/.bashrc
-source /home/ubuntu/.bashrc
+# Nodejs
+curl -sL https://deb.nodesource.com/setup_18.x -o nodesource_setup.sh
+bash nodesource_setup.sh
+sudo apt install nodejs npm
 
-# Initialize conda for bash shell (this makes conda activate command available)
-/opt/miniconda/bin/conda init bash
+# Tools
+sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+apt-get update -y
+apt-get install postgresql-client-14 -y
 
 # Install AWS CLI v2
 curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
 sudo ./aws/install
 
+# Get the instance ID using IMDSv2 and disable Source/Destination check
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/meta-data/instance-id)
+aws ec2 modify-instance-attribute --instance-id $INSTANCE_ID --no-source-dest-check
+
 # Set hostname
-hostnamectl set-hostname devel-bastion
+hostnamectl set-hostname admin-bastion
 
 # Get users and admins comma separated list
 export PARAM_USER_PATH="/config/infra-admin-bastion/user-list"
@@ -63,7 +72,9 @@ for user in "${user_array[@]}"; do
   chmod 700 /home/$user/.ssh
   chmod 600 /home/$user/.ssh/authorized_keys
   chown $user:$user /home/$user/.ssh/authorized_keys
-  usermod -aG docker $user  
+  usermod -aG docker $user
+  # Add Miniconda to PATH for the ubuntu user
+  echo 'export PATH="/opt/miniconda/bin:$PATH"' >> /home/$user/.bashrc
 done
 
 # Add sudo privileges to admins
@@ -71,6 +82,9 @@ IFS=',' read -ra admin_array <<< "$ADMIN_LIST"
 for admin in "${admin_array[@]}"; do
   usermod -aG sudo $admin
 done
+
+# Cleanup
+userdel -fr ubuntu 2>/dev/null
 
 # SystemD enable and start docker service
 systemctl enable --now docker
