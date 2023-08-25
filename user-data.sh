@@ -8,11 +8,24 @@ iptables -t nat -A POSTROUTING -o ens5 -j MASQUERADE
 # Persist the NAT settings across reboots
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 echo "net.ipv4.conf.ens5.send_redirects=0" >> /etc/sysctl.conf
-echo "iptables -t nat -A POSTROUTING -o ens5 -j MASQUERADE" >> /etc/rc.local
 
 # Update the package lists for upgrades and new package installations
 apt-get update
 apt-get upgrade -y
+
+# Preseed the answers for iptables-persistent package
+echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections
+echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections
+
+# Install iptables-persistent and save rules
+apt-get install -y iptables-persistent
+
+# Save the current rules
+iptables-save > /etc/iptables/rules.v4
+
+# Enable and start the netfilter-persistent service
+systemctl enable netfilter-persistent
+systemctl start netfilter-persistent
 
 # Install Docker
 apt-get install -y docker.io
