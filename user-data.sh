@@ -88,3 +88,6 @@ userdel -fr ubuntu 2>/dev/null
 
 # SystemD enable and start docker service
 systemctl enable --now docker
+
+# Reboot
+reboot now
